@@ -1,5 +1,11 @@
 # PyiCloud
 
+This fork adds a **read-only iCloud Photos MCP server** for direct cloud access,
+without a local Apple Photos library. Install with `uv pip install ".[cli,mcp]"`,
+authenticate separately, then run `icloud-photos-mcp`. See the
+[Photos MCP setup and tool guide](docs/services/photos-mcp.md) for session setup,
+client configuration, privacy boundaries, pagination, and search limitations.
+
 [![Build Status](https://github.com/timlaing/pyicloud/actions/workflows/tests.yml/badge.svg)](https://github.com/timlaing/pyicloud/actions/workflows/tests.yml)
 [![GitHub stars](https://img.shields.io/github/stars/timlaing/pyicloud.svg)](https://github.com/timlaing/pyicloud/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/timlaing/pyicloud.svg)](https://github.com/timlaing/pyicloud/issues)

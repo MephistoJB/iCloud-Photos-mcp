@@ -10,6 +10,8 @@ Releases from `2.0.0b6` up to `2.7.0` follow [Semantic Versioning](https://semve
 
 ### Added
 
+- Add an optional read-only iCloud Photos MCP server with saved-session authentication, library and album discovery, bounded metadata/date/GPS searches, photo details, and metadata-free JPEG previews.
+
 - Add `CloudKitZoneNotFoundError`, raised when CloudKit reports `ZONE_NOT_FOUND` instead of the generic `CloudKitApiError`, so callers can treat a missing zone (e.g. Reminders not enabled on the account) as a valid account state; it derives from `CloudKitApiError` and keeps the same message and payload, so existing handlers that catch `CloudKitApiError` and look for `ZONE_NOT_FOUND` keep working. The Reminders, Notes, and Invites services re-raise it as `RemindersZoneNotFoundError`, `NotesZoneNotFoundError`, and `InvitesZoneNotFoundError`; each derives from the service's generic API error.
 - Add a Photos error hierarchy following the same convention as the other CloudKit services: `PhotosAuthError`, `PhotosRateLimited`, `PhotosApiError`, and `PhotosZoneNotFoundError`, all deriving from `PhotosServiceException` (and therefore from `PyiCloudException`), exported from `pyicloud.services.photos`. Callers can catch `PhotosZoneNotFoundError` to treat a missing Photos zone as a valid account state; it reaches them while `api.photos` verifies the indexing state as well as from later queries, zone discovery, and writes.
 
