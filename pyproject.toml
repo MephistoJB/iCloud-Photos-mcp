@@ -34,6 +34,7 @@ repository = "https://github.com/timlaing/pyicloud"
 [project.scripts]
 icloud = "pyicloud.cmdline:main"
 icloud-photos-mcp = "pyicloud.photos_mcp:main"
+icloud-photos-mcp-http = "pyicloud.photos_mcp_http:main"
 
 [build-system]
 requires = ["setuptools >= 77.0,< 84.3", "setuptools-scm"]

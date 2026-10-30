@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Container version="2">
+  <Name>iCloud-Photos-mcp</Name>
+  <Repository>icloud-photos-mcp:local</Repository>
+  <Registry/>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Shell>sh</Shell>
+  <Overview>Token-free private-network iCloud Photos MCP with persistent Apple sessions. Reads by default; writes and deletes require separate opt-ins. Apple login is completed separately in the container console.</Overview>
+  <Category>Tools:</Category>
+  <WebUI>http://100.97.50.7:8301/</WebUI>
+  <Support>https://github.com/MephistoJB/iCloud-Photos-mcp</Support>
+  <Project>https://github.com/MephistoJB/iCloud-Photos-mcp</Project>
+  <ExtraParams>--publish 100.97.50.7:8301:8080 --restart unless-stopped --read-only --cap-drop=ALL --security-opt=no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,size=64m,uid=99,gid=100 --memory=512m --cpus=1 --pids-limit=128 --log-opt max-size=10m --log-opt max-file=3</ExtraParams>
+  <PostArgs/>
+  <Config Name="Persistent configuration" Target="/config" Default="/mnt/user/appdata/icloud-photos-mcp" Mode="rw" Description="Private Apple session; owner 99:100, directory mode 700" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/icloud-photos-mcp</Config>
+  <Config Name="Apple Account" Target="ICLOUD_USERNAME" Default="" Mode="" Description="Account email, not a password" Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Allowed HTTP hosts" Target="ICLOUD_PHOTOS_ALLOWED_HOSTS" Default="localhost:*,127.0.0.1:*,100.97.50.7:*" Mode="" Description="Explicit private hostnames/IPs accepted by MCP; comma-separated" Type="Variable" Display="always" Required="true" Mask="false">localhost:*,127.0.0.1:*,100.97.50.7:*</Config>
+  <Config Name="Enable writes" Target="ICLOUD_PHOTOS_ENABLE_WRITES" Default="0" Mode="" Description="1 enables explicitly requested writes; tool dry runs remain the default" Type="Variable" Display="always" Required="true" Mask="false">0</Config>
+  <Config Name="Enable deletes" Target="ICLOUD_PHOTOS_ENABLE_DELETES" Default="0" Mode="" Description="1 additionally enables deletion tools; write gate is also required" Type="Variable" Display="always" Required="true" Mask="false">0</Config>
+</Container>

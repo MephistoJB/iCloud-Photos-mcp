@@ -74,6 +74,7 @@ nav:
       - File Storage (Drive): services/drive.md
       - Photos: services/photos.md
       - Photos MCP: services/photos-mcp.md
+      - Photos MCP on Unraid: services/photos-mcp-unraid.md
       - Hide My Email: services/hidemyemail.md
       - Mail (experimental): services/mail.md
       - Reminders: services/reminders.md

@@ -7,6 +7,7 @@ and manage photo memberships. Library photo deletion needs a separate opt-in. In
 authenticate separately, then run `icloud-photos-mcp`. See the
 [Photos MCP setup and tool guide](docs/services/photos-mcp.md) for session setup,
 client configuration, privacy boundaries, pagination, and search limitations.
+For Docker and Unraid, see the [Unraid installation guide](docs/services/photos-mcp-unraid.md).
 
 [![Build Status](https://github.com/timlaing/pyicloud/actions/workflows/tests.yml/badge.svg)](https://github.com/timlaing/pyicloud/actions/workflows/tests.yml)
 [![GitHub stars](https://img.shields.io/github/stars/timlaing/pyicloud.svg)](https://github.com/timlaing/pyicloud/stargazers)
