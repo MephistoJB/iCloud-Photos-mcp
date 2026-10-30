@@ -12,6 +12,7 @@ Use Python 3.10 or newer and an isolated environment:
 ```sh
 uv venv
 uv pip install '.[cli,mcp]'
+. .venv/bin/activate
 ```
 
 Create a dedicated private session directory and log in interactively:
