@@ -1,6 +1,6 @@
 # iCloud Photos MCP
 
-This fork adds a **read-only stdio MCP server** that accesses iCloud Photos over
+This repository adds a **read-only-by-default stdio MCP server** that accesses iCloud Photos over
 Apple's web services. It does not require Photos.app, a local Photos library,
 Full Disk Access, or a complete photo download. The web API is unofficial;
 Apple changes can break it. There is no country-name, face, or semantic search.
@@ -72,14 +72,14 @@ listed as unsupported. Shared Library album coverage follows PyiCloud's limits.
 
 ## Tools
 
-| Tool             | Purpose                                                               |
-| ---------------- | --------------------------------------------------------------------- |
-| `doctor`         | Validate the saved session and Photos discovery without login prompts |
-| `list_libraries` | Discover library IDs                                                  |
-| `list_albums`    | List up to 100 albums per page                                        |
-| `search_photos`  | Filter by date, metadata text, favorite, and GPS bounds               |
-| `get_photo`      | Fetch metadata by an explicit photo ID                                |
-| `get_preview`    | Return a JPEG preview to the model without an original download       |
+| Tool             | Purpose                                                         |
+| ---------------- | --------------------------------------------------------------- |
+| `doctor`         | Validate the session, Photos access, and write gate             |
+| `list_libraries` | Discover library IDs                                            |
+| `list_albums`    | List up to 100 albums per page                                  |
+| `search_photos`  | Filter by date, metadata text, favorite, and GPS bounds         |
+| `get_photo`      | Fetch metadata by an explicit photo ID                          |
+| `get_preview`    | Return a JPEG preview to the model without an original download |
 
 `search_photos` accepts `library`, `album` (ID or exact name), `from_date`,
 `to_date`, `text`, `bounds`, `favorites_only`, `offset`, `limit`, and `scan_limit`.
@@ -107,6 +107,68 @@ size of at most 10 MiB and at most 20 million pixels; the output is resized to
 1,600 pixels and re-encoded as JPEG without EXIF. Unsupported or absent previews
 fail rather than falling back to originals. No persistent photo cache is created.
 
+## Optional organizing writes
+
+The server exposes `create_folder`, `create_album`, and `add_photos_to_album`.
+All three default to `dry_run: true`: they validate and describe the operation
+without changing iCloud. Actual writes additionally require this server-side
+configuration in the existing MCP environment block, followed by a restart:
+
+```toml
+ICLOUD_PHOTOS_ENABLE_WRITES = "1"
+```
+
+For JSON MCP configuration, add `"ICLOUD_PHOTOS_ENABLE_WRITES": "1"` to `env`.
+Only the exact value `1` enables writes. `doctor` reports `writes_enabled` and
+`read_only`. This is a capability gate, not a substitute for user authorization:
+an agent should apply only the organizing changes its user requested.
+
+| Tool                  | Arguments                                              |
+| --------------------- | ------------------------------------------------------ |
+| `create_folder`       | `name`, optional `parent_id`, `library`, `dry_run`     |
+| `create_album`        | `name`, optional `parent_id`, `library`, `dry_run`     |
+| `add_photos_to_album` | `album_id`, `photo_ids`, optional `library`, `dry_run` |
+
+Writes support the private `root` library only. Shared Libraries, Shared Albums,
+and smart albums are not write targets. Use explicit IDs returned by the read
+tools; `parent_id` must identify a folder and `album_id` a regular album.
+Folders hold other folders and albums; photos are assigned to an album inside a
+folder, not directly to the folder. `list_albums` includes `kind`, `parent_id`,
+and `path` so the hierarchy can be inspected.
+
+For example, to organize a trip:
+
+1. Preview `create_folder` with `name: "Travel"`; apply with `dry_run: false`.
+2. Preview and apply `create_album` with `name: "Greece 2026"` and the returned
+   folder ID as `parent_id`.
+3. Search the intended photos and review their explicit IDs.
+4. Preview `add_photos_to_album` with the returned album ID and those photo IDs;
+   apply that same batch with `dry_run: false`.
+
+Creation refreshes the album listing and reuses an existing same-name sibling
+of the correct type. Duplicate sibling names or a conflicting container type
+are rejected rather than guessed. Names are limited to 255 characters and must
+not be blank or contain slashes or control characters. Separate clients can
+still race to create duplicate names; there is no distributed uniqueness lock.
+If a response is missing or the connection fails after submitting a create,
+the result is unknown: inspect a fresh listing before retrying.
+
+Assignments accept 1 to 100 photo IDs, remove duplicate IDs, validate **all**
+photos and the target before writing, and skip existing album members. Hidden
+or missing photos reject the entire batch before any addition. Each new
+membership is read back. The operation is not an atomic multi-photo transaction:
+a later failure retains confirmed earlier additions, marks the current item as
+`uncertain` or `unconfirmed`, and marks remaining items `not_attempted`. Inspect
+membership before retrying; cloud read-after-write delays can produce an
+unconfirmed result even when Apple accepted the addition. There are no automatic
+write retries and no rollback or removal tool. Photos remain in their original
+library and all their other albums.
+
+The organizing tools have mutation annotations even for dry runs. There is no
+photo deletion, upload, move, or original-file export tool. The tests use mocked
+CloudKit responses; live account compatibility still requires an authenticated
+Apple session and a deliberate end-to-end check.
+
 Metadata and previews returned by tools are sent to your MCP/AI client and may
-reach its model provider. The server exposes no upload, deletion, album changes,
-original-file export, password entry, or other iCloud services.
+reach its model provider. The server exposes no password entry or other iCloud
+services.

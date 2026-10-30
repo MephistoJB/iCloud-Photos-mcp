@@ -786,14 +786,22 @@ class PhotoLibrary(BasePhotoLibrary):
         self,
         name: str,
         album_type: AlbumTypeEnum = AlbumTypeEnum.ALBUM,
+        *,
+        parent_id: str | None = None,
     ) -> PhotoAlbum | None:
         """Create a new album in the library and return it."""
+        if parent_id is not None and not isinstance(
+            self.albums.get(parent_id), PhotoAlbumFolder
+        ):
+            raise ValueError("Parent must identify an existing folder in this library")
         encoded = base64.b64encode(name.encode("utf-8")).decode("utf-8")
         position = _new_album_position()
         client = self._client
         if client is not None and _can_use_typed_cloudkit(self.service.session):
-            return self._create_album_typed(client, encoded, album_type, position)
-        return self._create_album_rest(encoded, album_type, position)
+            return self._create_album_typed(
+                client, encoded, album_type, position, parent_id
+            )
+        return self._create_album_rest(encoded, album_type, position, parent_id)
 
     def _create_album_typed(
         self,
@@ -801,6 +809,7 @@ class PhotoLibrary(BasePhotoLibrary):
         encoded: str,
         album_type: AlbumTypeEnum,
         position: int,
+        parent_id: str | None = None,
     ) -> PhotoAlbum | None:
         op = CKModifyOperation(
             operationType="create",
@@ -808,6 +817,11 @@ class PhotoLibrary(BasePhotoLibrary):
                 recordName=os.urandom(16).hex().upper(),
                 recordType="CPLAlbum",
                 fields={
+                    **(
+                        {"parentId": {"type": "STRING", "value": parent_id}}
+                        if parent_id is not None
+                        else {}
+                    ),
                     "albumNameEnc": {
                         "type": "ENCRYPTED_BYTES",
                         "value": encoded,
@@ -839,6 +853,7 @@ class PhotoLibrary(BasePhotoLibrary):
         encoded: str,
         album_type: AlbumTypeEnum,
         position: int,
+        parent_id: str | None = None,
     ) -> PhotoAlbum | None:
         endpoint = self.service.service_endpoint
         params = urlencode(self.service.params)
@@ -852,6 +867,11 @@ class PhotoLibrary(BasePhotoLibrary):
                         "record": {
                             "recordType": "CPLAlbum",
                             "fields": {
+                                **(
+                                    {"parentId": {"value": parent_id}}
+                                    if parent_id is not None
+                                    else {}
+                                ),
                                 "albumNameEnc": {"value": encoded},
                                 "albumType": {"value": album_type.value},
                                 "isDeleted": {"value": 0},
@@ -1473,6 +1493,11 @@ class PhotoAlbum(BasePhotoAlbum):
     @property
     def id(self) -> str:
         return self._record_id
+
+    @property
+    def parent_id(self) -> str | None:
+        """Return the containing folder ID, or None for a root album."""
+        return self._parent_id
 
     @property
     def fullname(self) -> str:

@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pyicloud.common.cloudkit import (
+    CKModifyResponse,
     CKQueryResponse,
     CKRecord,
     CKTombstoneRecord,
@@ -953,3 +954,68 @@ def test_upload_into_album_paths() -> None:
     album.id = "album-1"
     assert service._upload_into_album(album, "photo.jpg") is photo
     album.add_photo.assert_called_once_with(photo)
+
+
+@pytest.mark.parametrize("typed", [False, True])
+@pytest.mark.parametrize("folder", [False, True])
+def test_create_nested_container_parent_field(typed: bool, folder: bool) -> None:
+    """Both transport paths encode a validated folder ID on the create record."""
+    client = MagicMock() if typed else None
+    session = MagicMock()
+    library = _raw_library(client=client, session=session)
+    parent = library._convert_record_to_album(
+        _ck_record(
+            "CPLAlbum",
+            "parent",
+            {
+                "albumNameEnc": {"value": _b64("Travel")},
+                "albumType": {"value": AlbumTypeEnum.FOLDER.value},
+            },
+        )
+    )
+    library._albums = AlbumContainer([parent])
+    kind = AlbumTypeEnum.FOLDER if folder else AlbumTypeEnum.ALBUM
+    record = _ck_record(
+        "CPLAlbum",
+        "created",
+        {
+            "albumNameEnc": {"type": "ENCRYPTED_BYTES", "value": _b64("Trip")},
+            "albumType": {"type": "INT64", "value": kind.value},
+            "parentId": {"type": "STRING", "value": "parent"},
+        },
+    )
+    if typed:
+        assert client is not None
+        client.modify.return_value = CKModifyResponse(records=[record])
+    else:
+        session.post.return_value.json.return_value = {
+            "records": [record.model_dump(mode="json", exclude_none=True)]
+        }
+    with patch(
+        "pyicloud.services.photos_cloudkit.service._can_use_typed_cloudkit",
+        return_value=typed,
+    ):
+        created = library.create_album("Trip", kind, parent_id="parent")
+    assert created.parent_id == "parent"
+    assert created.fullname == "Travel/Trip"
+    assert isinstance(created, PhotoAlbumFolder) is folder
+    if typed:
+        assert client is not None
+        fields = client.modify.call_args.kwargs["operations"][0].record.fields
+        assert fields["parentId"].value == "parent"
+    else:
+        fields = session.post.call_args.kwargs["json"]["operations"][0]["record"][
+            "fields"
+        ]
+        assert fields["parentId"]["value"] == "parent"
+    assert library.albums.get("created") is created
+
+
+def test_create_nested_container_rejects_non_folder_parent() -> None:
+    """The library rejects unknown parents before issuing any mutation."""
+    session = MagicMock()
+    library = _raw_library(session=session)
+    library._albums = AlbumContainer()
+    with pytest.raises(ValueError, match="existing folder"):
+        library.create_album("Trip", parent_id="missing")
+    session.post.assert_not_called()

@@ -14,7 +14,13 @@ import pytest
 from requests import RequestException
 
 from pyicloud import photos_mcp as m
-from pyicloud.services.photos import PhotoLibrary
+from pyicloud.services.photos import (
+    AlbumContainer,
+    PhotoAlbum,
+    PhotoAlbumFolder,
+    PhotoLibrary,
+    SmartPhotoAlbum,
+)
 
 
 def asset(photo_id: str = "photo-1", **fields: Any) -> Any:
@@ -343,8 +349,16 @@ async def test_mcp_contract_and_calls(_dotenv: Any, reader: Any) -> None:
         "search_photos",
         "get_photo",
         "get_preview",
+        "create_folder",
+        "create_album",
+        "add_photos_to_album",
     }
-    assert all(tool.annotations and tool.annotations.readOnlyHint for tool in tools)
+    assert all(
+        tool.annotations
+        and tool.annotations.readOnlyHint
+        == (tool.name not in {"create_folder", "create_album", "add_photos_to_album"})
+        for tool in tools
+    )
     reader.library("root").albums = []
     reader.library("root").all.get.return_value = asset()
     for name, args in (
@@ -372,3 +386,224 @@ def test_cloudkit_location_decoding() -> None:
     location = base64.b64encode(plistlib.dumps({"lat": 35.2, "lon": 25.1})).decode()
     result = m.photo_summary(asset(locationEnc=location))
     assert result["location"] == {"latitude": 35.2, "longitude": 25.1}
+
+
+def container(
+    name: str = "Trip",
+    item_id: str = "album-1",
+    *,
+    folder: bool = False,
+    parent_id: str | None = None,
+) -> Any:
+    """An explicit container double with the same class boundary as production."""
+    item = MagicMock(spec=PhotoAlbumFolder if folder else PhotoAlbum)
+    item.id = item_id
+    item.name = name
+    item.parent_id = parent_id
+    item.fullname = name
+    item.get.return_value = None
+    return item
+
+
+def prepare_writes(reader: Any, items: list[Any]) -> Any:
+    """Populate refreshed albums and enable the root-library test fixture."""
+    selected = reader.library("root")
+    selected.refresh_albums.return_value = AlbumContainer(items)
+    return selected
+
+
+@pytest.mark.parametrize("library,dry_run", [("shared:zone", True), ("root", False)])
+def test_write_gate_before_account(reader: Any, library: str, dry_run: bool) -> None:
+    """A shared library or disabled gate must never trigger authentication."""
+    reader.api.get_auth_status.reset_mock()
+    with (
+        patch.dict("os.environ", {"ICLOUD_PHOTOS_ENABLE_WRITES": "0"}),
+        pytest.raises(m.RequestError),
+    ):
+        reader.create_container("Trip", False, None, library, dry_run)
+    reader.api.get_auth_status.assert_not_called()
+
+
+@pytest.mark.parametrize("name", ["", "  ", "a/b", "a\n", "a" * 256])
+def test_container_invalid_name(reader: Any, name: str) -> None:
+    """Names are validated before account access."""
+    with pytest.raises(m.RequestError):
+        reader.create_container(name, False, None, "root", True)
+
+
+@pytest.mark.parametrize("folder", [False, True])
+def test_create_preview_existing_and_nested(reader: Any, folder: bool) -> None:
+    """Folder and album plans are non-writing and parent-aware."""
+    parent = container("Travel", "parent", folder=True)
+    selected = prepare_writes(reader, [parent])
+    plan = reader.create_container("Trip", folder, "parent", "root", True)
+    assert plan["status"] == "would_create"
+    assert plan["container"]["parent_id"] == "parent"
+    selected.create_album.assert_not_called()
+    created = container(parent_id="parent", folder=folder)
+    selected.create_album.return_value = created
+    with patch.dict("os.environ", {"ICLOUD_PHOTOS_ENABLE_WRITES": "1"}):
+        result = reader.create_container("Trip", folder, "parent", "root", False)
+    assert result["status"] == "created"
+    assert selected.create_album.call_args.kwargs["parent_id"] == "parent"
+    selected.refresh_albums.return_value = AlbumContainer([parent, created])
+    selected.create_album.reset_mock()
+    assert (
+        reader.create_container("Trip", folder, "parent", "root", True)["status"]
+        == "already_exists"
+    )
+    selected.create_album.assert_not_called()
+    # Names may repeat in different parent folders without being ambiguous.
+    assert (
+        reader.create_container("Trip", folder, None, "root", True)["status"]
+        == "would_create"
+    )
+
+
+@pytest.mark.parametrize(
+    "items,parent_id",
+    [
+        ([], "missing"),
+        ([container()], "album-1"),
+        ([container(), container(item_id="duplicate")], None),
+        ([container(folder=True)], None),
+    ],
+)
+def test_create_invalid_parent_or_name_collision(
+    reader: Any, items: Any, parent_id: Any
+) -> None:
+    """No mutation for an invalid parent, ambiguous name or wrong sibling type."""
+    selected = prepare_writes(reader, items)
+    with pytest.raises(m.RequestError):
+        reader.create_container("Trip", False, parent_id, "root", True)
+    selected.create_album.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", [None, "exception", "wrong-parent"])
+def test_create_uncertain_outcome(reader: Any, failure: Any) -> None:
+    """Never report a successful creation without a matching response."""
+    selected = prepare_writes(reader, [])
+    selected.create_album.return_value = (
+        container(parent_id="unexpected") if failure == "wrong-parent" else None
+    )
+    if failure == "exception":
+        selected.create_album.side_effect = RequestException("secret-token")
+    with (
+        patch.dict("os.environ", {"ICLOUD_PHOTOS_ENABLE_WRITES": "1"}),
+        pytest.raises(m.RequestError, match="before retrying") as raised,
+    ):
+        reader.create_container("Trip", False, None, "root", False)
+    assert "secret" not in str(raised.value)
+    assert reader.api is None
+
+
+@pytest.mark.parametrize(
+    "target", [None, container(folder=True), MagicMock(spec=SmartPhotoAlbum)]
+)
+def test_assign_invalid_target(reader: Any, target: Any) -> None:
+    """Only a regular album is a valid destination."""
+    selected = prepare_writes(reader, [])
+    selected.refresh_albums.return_value.get = MagicMock(return_value=target)
+    with pytest.raises(m.RequestError):
+        reader.assign_photos("album-1", ["photo-1"], "root", True)
+
+
+@pytest.mark.parametrize(
+    "album_id,ids",
+    [("", ["x"]), ("a", []), ("a", [""]), ("a", ["x"] * 101), ("a", ["x" * 513])],
+)
+def test_assign_invalid_batch(reader: Any, album_id: str, ids: list[str]) -> None:
+    """Validate batch bounds without sending any writes."""
+    with pytest.raises(m.RequestError):
+        reader.assign_photos(album_id, ids, "root", True)
+
+
+def test_assign_validates_whole_batch(reader: Any) -> None:
+    """An unknown or hidden photo prevents every write in the batch."""
+    target = container()
+    selected = prepare_writes(reader, [target])
+    selected.all.get.side_effect = [asset(), None]
+    with (
+        patch.dict("os.environ", {"ICLOUD_PHOTOS_ENABLE_WRITES": "1"}),
+        pytest.raises(m.RequestError),
+    ):
+        reader.assign_photos(target.id, ["photo-1", "missing"], "root", False)
+    target.add_photo.assert_not_called()
+
+
+def test_assignment_plan_deduplicates_and_skips_members(reader: Any) -> None:
+    """Duplicate IDs and existing memberships never cause redundant mutations."""
+    target = container()
+    selected = prepare_writes(reader, [target])
+    selected.all.get.side_effect = asset
+    target.get.side_effect = lambda value: asset(value) if value == "present" else None
+    plan = reader.assign_photos(target.id, ["present", "new", "new"], "root", True)
+    assert [item["status"] for item in plan["results"]] == [
+        "already_present",
+        "would_add",
+    ]
+    target.add_photo.assert_not_called()
+    target.get.side_effect = [asset("present"), None, asset("new")]
+    target.add_photo.return_value = True
+    with patch.dict("os.environ", {"ICLOUD_PHOTOS_ENABLE_WRITES": "1"}):
+        result = reader.assign_photos(
+            target.id, ["present", "new", "new"], "root", False
+        )
+    assert [item["status"] for item in result["results"]] == [
+        "already_present",
+        "added",
+    ]
+    assert result["complete"] is True
+    target.add_photo.assert_called_once()
+
+
+@pytest.mark.parametrize("failure", ["exception", "false", "missing"])
+def test_assignment_partial_failure_preserves_progress(
+    reader: Any, failure: str
+) -> None:
+    """Stop after uncertain outcomes and preserve confirmed earlier additions."""
+    target = container()
+    selected = prepare_writes(reader, [target])
+    selected.all.get.side_effect = asset
+    target.get.side_effect = [None, None, None, asset("one"), None]
+    target.add_photo.side_effect = [
+        True,
+        RequestException("secret-url")
+        if failure == "exception"
+        else failure != "false",
+    ]
+    with patch.dict("os.environ", {"ICLOUD_PHOTOS_ENABLE_WRITES": "1"}):
+        result = reader.assign_photos(target.id, ["one", "two", "three"], "root", False)
+    assert result["complete"] is False
+    assert result["results"][0]["status"] == "added"
+    assert result["results"][1]["status"] == (
+        "uncertain" if failure == "exception" else "unconfirmed"
+    )
+    assert result["results"][2]["status"] == "not_attempted"
+    assert "secret-url" not in str(result)
+    assert target.add_photo.call_count == 2
+
+
+@patch(
+    "pydantic_settings.sources.providers.dotenv.DotEnvSettingsSource._read_env_files",
+    return_value={},
+)
+async def test_mcp_write_tools_and_doctor(_dotenv: Any, reader: Any) -> None:
+    """MCP defaults to dry runs and reports server-side write permission."""
+    target = container()
+    prepare_writes(reader, [target])
+    reader.api.photos.libraries["root"].all.get.return_value = asset()
+    server = m.create_server(reader)
+    tools = {tool.name: tool for tool in await server.list_tools()}
+    for name in ("create_album", "create_folder", "add_photos_to_album"):
+        assert tools[name].inputSchema["properties"]["dry_run"]["default"] is True
+        assert await server.call_tool(
+            name,
+            {"album_id": target.id, "photo_ids": ["photo-1"]}
+            if name == "add_photos_to_album"
+            else {"name": "New"},
+        )
+    target.add_photo.assert_not_called()
+    with patch.dict("os.environ", {"ICLOUD_PHOTOS_ENABLE_WRITES": "1"}):
+        result = await server.call_tool("doctor", {})
+    assert "writes_enabled" in str(result)
