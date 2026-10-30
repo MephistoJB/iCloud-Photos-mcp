@@ -161,13 +161,69 @@ a later failure retains confirmed earlier additions, marks the current item as
 `uncertain` or `unconfirmed`, and marks remaining items `not_attempted`. Inspect
 membership before retrying; cloud read-after-write delays can produce an
 unconfirmed result even when Apple accepted the addition. There are no automatic
-write retries and no rollback or removal tool. Photos remain in their original
+write retries and no automatic rollback. Photos remain in their original
 library and all their other albums.
 
-The organizing tools have mutation annotations even for dry runs. There is no
-photo deletion, upload, move, or original-file export tool. The tests use mocked
-CloudKit responses; live account compatibility still requires an authenticated
-Apple session and a deliberate end-to-end check.
+## Editing, moving, and deleting
+
+The following tools also default to `dry_run: true` and require the write gate
+for actual changes. Only explicit IDs in the private `root` library are accepted.
+
+| Tool                         | Effect                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| `rename_container`           | Rename an album or folder (`container_id`, `name`)                       |
+| `move_container`             | Move an album/folder to `parent_id`; null means library root             |
+| `set_photo_metadata`         | Change title, description, favorite, or ISO capture time                 |
+| `remove_photos_from_album`   | Remove only the selected album memberships                               |
+| `move_photos_between_albums` | Confirm target membership, then remove source membership                 |
+| `delete_container`           | Delete an album or folder while keeping its photos                       |
+| `delete_photos`              | Mark photos deleted from the whole iCloud library, across synced devices |
+
+Use `list_albums` to obtain container IDs and inspect the hierarchy first.
+Moves reject cycles, invalid parents, smart albums, and sibling-name collisions.
+`set_photo_metadata` accepts `photo_id`, optional `title`, `description`,
+`favorite`, and `taken_at`. Omitted/null fields are unchanged; an empty string
+clears a title/description. A date without an offset uses UTC. Metadata changes
+show before/after values and leave the original file's EXIF untouched.
+
+Removing photos from an album deletes **only** their relation records. Moving
+between albums validates all photo IDs and both regular album IDs first, adds
+and verifies each destination membership, and only then removes its source
+membership. It does not remove photos from any other albums. A partial move
+reports the affected photo and phase (`destination` or `source`); later items
+are `not_attempted`. Inspect the current memberships before retrying. There is
+no rollback that might accidentally remove a successfully preserved photo.
+
+Actual `delete_container` and `delete_photos` calls additionally require:
+
+```toml
+ICLOUD_PHOTOS_ENABLE_DELETES = "1"
+```
+
+Add this alongside `ICLOUD_PHOTOS_ENABLE_WRITES = "1"` in the server environment
+and restart. `doctor` reports the effective `deletes_enabled` state. Removing
+an album membership, and moving memberships, need only the write gate.
+
+Deleting an album does not delete its photos. Deleting a nonempty folder is
+rejected unless `recursive: true` is explicitly supplied; a recursive plan
+lists all affected containers and deletes children before parents, at most
+100 containers per call. Photos always remain in the library. `delete_photos`
+accepts at most 100 explicit photo IDs and sets the library deletion marker;
+it never expunges originals or empties Recently Deleted. Availability and
+retention of recovery follow Apple's current account rules. Deleting from the
+library affects all synced devices, not just the current album.
+
+All edit targets are looked up again with a fresh record change tag. The server
+uses conflict-aware updates/deletes, not forced replacements. A conflicting
+record or network failure yields `uncertain`/`unconfirmed`; remaining batch
+items are skipped. A matching mutation response is required for confirmation.
+A move to root preserves an explicit JSON null for the old parent field.
+These are modeled private web API operations; tests use captured/local fixtures
+and doubles. Real-account compatibility still needs a deliberate end-to-end
+check after authentication. No live photos are changed by the test suite.
+
+The editing tools carry destructive MCP annotations even during dry runs.
+The server does not upload files, export originals, or permanently purge photos.
 
 Metadata and previews returned by tools are sent to your MCP/AI client and may
 reach its model provider. The server exposes no password entry or other iCloud

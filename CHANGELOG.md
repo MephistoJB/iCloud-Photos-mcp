@@ -10,6 +10,8 @@ Releases from `2.0.0b6` up to `2.7.0` follow [Semantic Versioning](https://semve
 
 ### Added
 
+- Add gated MCP tools for renaming/moving containers, editing supported photo metadata, removing/moving album memberships, recursively deleting containers while preserving photos, and marking library photos deleted. Include explicit dry runs, deletion opt-in, conflict-aware change tags, and partial outcome reporting.
+
 - Add opt-in MCP tools to create nested folders and albums and assign existing photos to regular albums, with dry runs, whole-batch validation, membership checks and explicit partial outcomes. Expose album hierarchy and support parent folder IDs in CloudKit album creation.
 
 - Add an optional read-only iCloud Photos MCP server with saved-session authentication, library and album discovery, bounded metadata/date/GPS searches, photo details, and metadata-free JPEG previews.
@@ -28,6 +30,8 @@ Releases from `2.0.0b6` up to `2.7.0` follow [Semantic Versioning](https://semve
 - Simplify Mail draft validation and failure-path tests without changing write outcomes, safety checks, or retry behavior.
 
 ### Fixed
+
+- Preserve explicit null field values in CloudKit modify requests so moving a container back to the library root clears its previous parent.
 
 - Give `mail delete-forever` actionable folder-refresh guidance when UID validity is missing instead of suggesting its unavailable `--limit` option.
 - Preserve MIME parameters and repeated filenames for distinct source attachments in forward drafts while retaining strict upload validation and exact source-part checks.

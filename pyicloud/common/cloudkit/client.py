@@ -702,6 +702,11 @@ class CloudKitContainerClient:
             zoneID=zone_id,
             atomic=atomic,
         ).model_dump(mode="json", exclude_none=True)
+        # An explicit null clears a field; exclude_none must not erase that intent.
+        for operation, wire in zip(operations, payload["operations"], strict=True):
+            for name, field in operation.record.fields.items():
+                if field.value is None:
+                    wire["record"]["fields"][name]["value"] = None
         data = self._http.post("/records/modify", payload)
         try:
             response = self._validate_response(CKModifyResponse, data)

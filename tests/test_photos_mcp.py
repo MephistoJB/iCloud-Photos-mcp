@@ -352,11 +352,24 @@ async def test_mcp_contract_and_calls(_dotenv: Any, reader: Any) -> None:
         "create_folder",
         "create_album",
         "add_photos_to_album",
+        "rename_container",
+        "move_container",
+        "set_photo_metadata",
+        "remove_photos_from_album",
+        "move_photos_between_albums",
+        "delete_container",
+        "delete_photos",
+    }
+    read_names = {
+        "doctor",
+        "list_libraries",
+        "list_albums",
+        "search_photos",
+        "get_photo",
+        "get_preview",
     }
     assert all(
-        tool.annotations
-        and tool.annotations.readOnlyHint
-        == (tool.name not in {"create_folder", "create_album", "add_photos_to_album"})
+        tool.annotations and tool.annotations.readOnlyHint == (tool.name in read_names)
         for tool in tools
     )
     reader.library("root").albums = []

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import timezone
 from functools import wraps
 from io import BytesIO
 from itertools import islice
@@ -22,9 +22,14 @@ from requests import RequestException
 
 from pyicloud import PyiCloudService
 from pyicloud.exceptions import PyiCloudException
+from pyicloud.photos_mcp_common import (
+    RequestError,
+    album_summary,
+    parse_date,
+)
+from pyicloud.photos_mcp_edits import register_edit_tools
 from pyicloud.services.photos import (
     AlbumTypeEnum,
-    BasePhotoAlbum,
     PhotoAlbum,
     PhotoAlbumFolder,
     PhotoAsset,
@@ -33,6 +38,20 @@ from pyicloud.services.photos import (
 )
 from pyicloud.services.photos_cloudkit.mappers import record_field_value
 from pyicloud.services.photos_cloudkit.materialize import build_xmp_metadata
+
+__all__ = [
+    "PhotosReader",
+    "RequestError",
+    "album_summary",
+    "parse_date",
+    "photo_summary",
+    "in_bounds",
+    "writes_enabled",
+    "validate_page",
+    "guarded",
+    "create_server",
+    "main",
+]
 
 MAX_PREVIEW_BYTES = 10 * 1024 * 1024
 ANNOTATIONS = ToolAnnotations(
@@ -47,38 +66,6 @@ WRITE_ANNOTATIONS = ToolAnnotations(
 def writes_enabled() -> bool:
     """Writes require an explicit server-side opt-in, never a tool argument."""
     return os.environ.get("ICLOUD_PHOTOS_ENABLE_WRITES") == "1"
-
-
-def album_summary(album: BasePhotoAlbum) -> dict[str, Any]:
-    """Describe hierarchy without returning raw records."""
-    return {
-        "id": album.id,
-        "name": album.name,
-        "kind": "folder"
-        if isinstance(album, PhotoAlbumFolder)
-        else ("smart_album" if isinstance(album, SmartPhotoAlbum) else "album"),
-        "parent_id": album.parent_id if isinstance(album, PhotoAlbum) else None,
-        "path": album.fullname if isinstance(album, PhotoAlbum) else album.name,
-    }
-
-
-class RequestError(ValueError):
-    """A safe, locally constructed message intended for the MCP client."""
-
-
-def parse_date(value: str | None, *, end: bool = False) -> datetime | None:
-    """Interpret a bare date as a UTC day, with an exclusive upper bound."""
-    if value is None:
-        return None
-    try:
-        result = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        raise RequestError("Dates must use ISO 8601 format.") from None
-    if result.tzinfo is None:
-        result = result.replace(tzinfo=timezone.utc)
-    if end and len(value) == 10:
-        result += timedelta(days=1)
-    return result
 
 
 def photo_summary(photo: PhotoAsset) -> dict[str, Any]:
@@ -503,6 +490,8 @@ def create_server(reader: PhotosReader | None = None) -> FastMCP:
             "authenticated": True,
             "read_only": not writes_enabled(),
             "writes_enabled": writes_enabled(),
+            "deletes_enabled": writes_enabled()
+            and os.environ.get("ICLOUD_PHOTOS_ENABLE_DELETES") == "1",
             **libraries,
         }
 
@@ -607,6 +596,7 @@ def create_server(reader: PhotosReader | None = None) -> FastMCP:
         """
         return reader.assign_photos(album_id, photo_ids, library, dry_run)
 
+    register_edit_tools(server, reader, lambda function: guarded(reader, function))
     return server
 
 
