@@ -28,7 +28,7 @@ def http_client() -> Any:
 
 
 def test_public_status_does_not_expose_account(client: Any) -> None:
-    """Liveness is available without network isolation, but has no Apple details."""
+    """Liveness is available inside trusted networks, but has no Apple details."""
     assert client.get("/health").json() == {
         "service": "iCloud-Photos-mcp",
         "status": "running",
@@ -129,3 +129,34 @@ def test_default_configuration_and_main() -> None:
         access_log=False,
         proxy_headers=False,
     )
+
+
+@pytest.mark.parametrize(
+    "source", ["192.168.1.20", "100.90.1.2", "127.0.0.1", "::1", "fd7a:115c:a1e0::1"]
+)
+def test_configured_private_networks(source: str) -> None:
+    """The deployed LAN and Tailscale ranges allow direct clients without tokens."""
+    with patch.dict(
+        "os.environ",
+        {
+            "ICLOUD_PHOTOS_ALLOWED_NETWORKS": (
+                "192.168.1.0/24,100.64.0.0/10,127.0.0.0/8,::1/128,fd7a:115c:a1e0::/48"
+            )
+        },
+    ):
+        application = AsyncMock()
+        app = http.NetworkAccess(application)
+    scope: Scope = {"type": "http", "client": (source, 12345)}
+    receive, send = AsyncMock(), AsyncMock()
+    asyncio.run(app(scope, receive, send))
+    application.assert_awaited_once_with(scope, receive, send)
+
+
+@pytest.mark.parametrize("networks", ["", " , ", "192.168.1.1/invalid"])
+def test_invalid_network_configuration(networks: str) -> None:
+    """Invalid ranges fail closed rather than accepting arbitrary clients."""
+    with (
+        patch.dict("os.environ", {"ICLOUD_PHOTOS_ALLOWED_NETWORKS": networks}),
+        pytest.raises(ValueError),
+    ):
+        http.NetworkAccess(AsyncMock())

@@ -28,8 +28,8 @@ Import the XML as a user template under
 `/boot/config/plugins/dockerMan/templates-user/my-iCloud-Photos-mcp.xml`.
 Set `ICLOUD_USERNAME` to the Apple Account identifier. The private session is
 persisted at `/config/session`. The centralserver template binds port 8301 on
-`100.97.50.7` only; edit the publish addresses and explicit
-allowed-host list for a different server. Do not publish this service to the
+`192.168.1.16` (LAN) and `100.97.50.7` (Tailscale); edit the publish addresses,
+`ICLOUD_PHOTOS_ALLOWED_NETWORKS` and explicit allowed-host list for a different server. Do not publish this service to the
 public Internet. Use the Tailscale address for an encrypted network path.
 
 The installed instance uses:
@@ -37,13 +37,18 @@ The installed instance uses:
 - Container: `iCloud-Photos-mcp`
 - Image: `icloud-photos-mcp:local`
 - Status page: `http://100.97.50.7:8301/`
-- MCP: `http://100.97.50.7:8301/mcp`
+- MCP on LAN: `http://192.168.1.16:8301/mcp`
+- MCP on Tailscale: `http://100.97.50.7:8301/mcp`
 - Session directory: `/config/session`
 
-All HTTP requests require a direct loopback or Tailscale source address. Forwarded
-headers are not trusted. No Authorization header or MCP token is needed. The
-container port is published only on the server's Tailscale address, not its LAN
-address. Devices permitted by your Tailscale access policy can call the MCP.
+All HTTP requests require a source address in `ICLOUD_PHOTOS_ALLOWED_NETWORKS`.
+The centralserver template permits loopback, LAN `192.168.1.0/24` and Tailscale
+ranges. The application default permits only loopback and Tailscale; explicitly
+configure your actual LAN range when deploying elsewhere. Invalid or empty ranges
+prevent startup. Forwarded headers are not trusted. No Authorization header or MCP
+token is needed. The container port is published on both server addresses.
+Devices on the configured LAN or permitted by your Tailscale access policy can
+call the MCP.
 Explicit Host validation and Origin checks protect the MCP endpoint against DNS
 rebinding. Health checks indicate service liveness, not a successful Apple login.
 
@@ -68,7 +73,7 @@ terms acceptance, review and accept those yourself. With Advanced Data
 Protection, trusted-device web authorization may be required. The service never
 disables that protection automatically.
 
-Restart the container after login, then call `doctor` with a MCP
+Restart the container after login, then call `doctor` with an MCP
 client. Re-run login when Apple expires the session. Back up `/config` privately;
 session cookies are credentials. A healthy container with a
 missing/expired Apple session returns an actionable tool error.

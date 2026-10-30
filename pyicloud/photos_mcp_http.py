@@ -16,19 +16,20 @@ from pyicloud.photos_mcp import create_server
 
 
 class NetworkAccess:
-    """Accept direct loopback and Tailscale clients without a bearer token."""
+    """Accept configured private network clients without a bearer token."""
 
     def __init__(self, application: ASGIApp) -> None:
         self.application = application
         self.networks = tuple(
-            ip_network(value)
-            for value in (
-                "127.0.0.0/8",
-                "::1/128",
-                "100.64.0.0/10",
-                "fd7a:115c:a1e0::/48",
-            )
+            ip_network(value.strip())
+            for value in os.environ.get(
+                "ICLOUD_PHOTOS_ALLOWED_NETWORKS",
+                "127.0.0.0/8,::1/128,100.64.0.0/10,fd7a:115c:a1e0::/48",
+            ).split(",")
+            if value.strip()
         )
+        if not self.networks:
+            raise ValueError("Configure at least one trusted source network.")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
@@ -61,7 +62,7 @@ async def dashboard(_request: Request) -> HTMLResponse:
 body{font:17px system-ui;background:#111827;color:#e5e7eb;max-width:700px;margin:12vh auto;padding:24px}
 h1{color:#fff}a{color:#93c5fd}code{background:#1f2937;padding:3px 7px;border-radius:5px}
 </style><h1>iCloud Photos MCP</h1><p>The MCP service is running.</p>
-<p>The <code>/mcp</code> endpoint is available without a token through the private Tailscale network.
+<p>The <code>/mcp</code> endpoint is available without a token through the configured private networks.
 Sign in to your Apple Account separately. This status page does not confirm an Apple login.</p>
 <p><a href="https://github.com/MephistoJB/iCloud-Photos-mcp/blob/main/docs/services/photos-mcp-unraid.md">Setup and login</a></p>
 <p><a href="/health">Service status</a></p></html>""")
